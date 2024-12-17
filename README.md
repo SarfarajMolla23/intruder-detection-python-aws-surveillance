@@ -4,124 +4,142 @@
 ### pipeline
 ![Screenshot 2024-12-17 204250](https://github.com/user-attachments/assets/bff3a2f8-f205-47c0-aef7-ccdefaad3be0)
 
-### execution
 
-setting up producer
-Please go here for a more comprehensive explanation of how to setup the producer depending on your OS.
+# Amazon Kinesis Video Streams Setup Guide
 
-This is how to set it up from Ubuntu:
+## Producer Setup
 
-  sudo apt update
+### Setting up on Ubuntu
 
-  git clone https://github.com/awslabs/amazon-kinesis-video-streams-producer-sdk-cpp.git
+1. Update packages:
+   ```bash
+   sudo apt update
+   ```
 
-  mkdir -p amazon-kinesis-video-streams-producer-sdk-cpp/build
+2. Clone the repository:
+   ```bash
+   git clone https://github.com/awslabs/amazon-kinesis-video-streams-producer-sdk-cpp.git
+   ```
 
-  cd amazon-kinesis-video-streams-producer-sdk-cpp/build
+3. Create a build directory:
+   ```bash
+   mkdir -p amazon-kinesis-video-streams-producer-sdk-cpp/build
+   cd amazon-kinesis-video-streams-producer-sdk-cpp/build
+   ```
 
-  sudo apt-get install libssl-dev libcurl4-openssl-dev liblog4cplus-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base-apps gstreamer1.0-plugins-bad gstreamer1.0-plugins-good gstreamer1.0-plugins-ugly gstreamer1.0-tools
+4. Install required dependencies:
+   ```bash
+   sudo apt-get install libssl-dev libcurl4-openssl-dev liblog4cplus-dev libgstreamer1.0-dev \
+   libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base-apps gstreamer1.0-plugins-bad \
+   gstreamer1.0-plugins-good gstreamer1.0-plugins-ugly gstreamer1.0-tools
 
-  sudo apt  install cmake
+   sudo apt install cmake
+   sudo apt-get install g++
+   sudo apt-get install build-essential
+   ```
 
-  sudo apt-get install g++
+5. Build and install the SDK:
+   ```bash
+   cmake .. -DBUILD_DEPENDENCIES=OFF -DBUILD_GSTREAMER_PLUGIN=ON
+   make
+   sudo make install
+   ```
 
-  sudo apt-get install build-essential
+6. Set environment variables:
+   ```bash
+   cd ..
+   export GST_PLUGIN_PATH=`pwd`/build
+   export LD_LIBRARY_PATH=`pwd`/open-source/local/lib
+   ```
 
-  cmake .. -DBUILD_DEPENDENCIES=OFF -DBUILD_GSTREAMER_PLUGIN=ON
+7. Create a video stream in [Kinesis Video Streams](https://console.aws.amazon.com/kinesisvideo/).
 
-  make
+8. Create an IAM user with `AmazonKinesisVideoStreamsFullAccess` permissions and generate access keys.
 
-  sudo make install
+9. Stream video using the following command:
+   ```bash
+   gst-launch-1.0 v4l2src do-timestamp=TRUE device=/dev/video0 ! videoconvert ! \
+   video/x-raw,format=I420,width=640,height=480,framerate=30/1 ! x264enc bframes=0 \
+   key-int-max=45 bitrate=500 ! video/x-h264,stream-format=avc,alignment=au,profile=baseline ! \
+   kvssink stream-name=STREAM-NAME storage-size=512 access-key=ACCESS_KEY secret-key=SECRET_KEY aws-region=REGION_NAME
+   ```
 
-  cd ..
+---
 
-  export GST_PLUGIN_PATH=`pwd`/build
+## Consumer Setup
 
-  export LD_LIBRARY_PATH=`pwd`/open-source/local/lib
-Go to Kinesis Video Streams and create a new video stream.
+### Consumer #1: Backup
 
-Go to IAM and create a new user with AmazonKinesisVideoStreamsFullAccess permissions.
+1. Create an S3 bucket.
 
-Select the IAM user you created, go to Security credentials and create access keys.
+2. Launch an EC2 instance (t2.medium) with 8GB storage.
 
-Execute the following command:
+3. Create an IAM role with `AmazonKinesisVideoStreamsFullAccess` and `AmazonS3FullAccess` policies, and attach it to the EC2 instance.
 
-gst-launch-1.0 v4l2src do-timestamp=TRUE device=/dev/video0 ! videoconvert ! video/x-raw,format=I420,width=640,height=480,framerate=30/1 ! x264enc  bframes=0 key-int-max=45 bitrate=500 ! video/x-h264,stream-format=avc,alignment=au,profile=baseline ! kvssink stream-name=STREAM-NAME storage-size=512 access-key=ACCESS_KEY secret-key=SECRET_KEY aws-region=REGION_NAME
-setting up consumer #1: backup
-Go to S3 and create an S3 bucket.
+4. SSH into the EC2 instance and execute the following commands:
+   ```bash
+   sudo apt update
+   sudo apt install python3-virtualenv
 
-Go to EC2 and launch a t2.medium instance with 8GB storage size.
+   virtualenv venv --python=python3
+   source venv/bin/activate
 
-Go to IAM and create an access role for the EC2 instance with the following policies: AmazonKinesisVideoStreamsFullAccess and AmazonS3FullAccess.
+   git clone https://github.com/aws-samples/amazon-kinesis-video-streams-consumer-library-for-python.git
+   cd amazon-kinesis-video-streams-consumer-library-for-python
+   pip install -r requirements.txt
+   ```
 
-Attach the IAM role to the EC2 instance.
+5. Edit the `region` and `stream name` in the script.
 
-SSH into the EC2 instance.
+6. Add backup functionality.
 
-Execute the following commands in the EC2 instance:
+7. Run the consumer:
+   ```bash
+   python kvs_consumer_library_example.py
+   ```
 
-sudo apt update
+---
 
-sudo apt install python3-virtualenv
+### Consumer #2: Intruder Detection
 
-virtualenv venv --python=python3
+1. Create the following resources:
+   - An S3 bucket
+   - A DynamoDB table
+   - An SNS topic
+   - A subscription to the SNS topic
 
-source venv/bin/activate
+2. Set up event notifications for the S3 bucket.
 
-git clone https://github.com/aws-samples/amazon-kinesis-video-streams-consumer-library-for-python.git
+3. Launch an EC2 instance (t2.medium) with 8GB storage.
 
-cd amazon-kinesis-video-streams-consumer-library-for-python
+4. Create an IAM role with the following policies:
+   - `AmazonKinesisVideoStreamsFullAccess`
+   - `AmazonDynamoDBFullAccess`
+   - `AmazonS3FullAccess`
+   - `AmazonRekognitionFullAccess`
 
-pip install -r requirements.txt
-Edit region name and stream name.
+   Attach the role to the EC2 instance.
 
-Add backup funcionality.
+5. SSH into the EC2 instance and execute the following commands:
+   ```bash
+   sudo apt update
+   sudo apt install python3-virtualenv
 
-Execute the following commands:
+   virtualenv venv --python=python3
+   source venv/bin/activate
 
-cd ~/amazon-kinesis-video-streams-consumer-library-for-python
-python kvs_consumer_library_example.py
-setting up consumer #2: intruder detection
-Go to S3 and create an S3 bucket.
+   git clone https://github.com/aws-samples/amazon-kinesis-video-streams-consumer-library-for-python.git
+   cd amazon-kinesis-video-streams-consumer-library-for-python
+   pip install -r requirements.txt
 
-Go to DynamoDB and create a table.
+   sudo apt-get update && sudo apt-get install ffmpeg libsm6 libxext6 -y
+   ```
 
-Go to SNS and create a new topic.
+6. Edit the `region` and `stream name` in the script.
 
-Select the topic you created and create a new subscription.
+7. Add intruder detection functionality.
 
-Go to the S3 bucket you created and create a new event notification.
-
-Go to EC2 and launch a t2.medium instance with 8GB storage size.
-
-Go to IAM and create an access role for the EC2 instance with the following policies: AmazonKinesisVideoStreamsFullAccess, AmazonDynamoDBFullAccess, AmazonS3FullAccess and AmazonRekognitionFullAccess.
-
-Attach the IAM role to the EC2 instance.
-
-SSH into the EC2 instance.
-
-Execute the following commands in the EC2 instance:
-
-sudo apt update
-
-sudo apt install python3-virtualenv
-
-virtualenv venv --python=python3
-
-source venv/bin/activate
-
-git clone https://github.com/aws-samples/amazon-kinesis-video-streams-consumer-library-for-python.git
-
-cd amazon-kinesis-video-streams-consumer-library-for-python
-
-pip install -r requirements.txt
-
-sudo apt-get update && sudo apt-get install ffmpeg libsm6 libxext6  -y
-Edit region name and stream name.
-
-Add intruder detection funcionality.
-
-Execute the following commands:
-
-cd ~/amazon-kinesis-video-streams-consumer-library-for-python
-python kvs_consumer_library_example.py
+8. Run the consumer:
+   ```bash
+   python kvs_consumer_library_example.py
+   
